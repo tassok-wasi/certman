@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"certman/app/utils"
+	"encoding/pem"
 	"fmt"
+	"strings"
 )
 
 type ReadCmd struct {
@@ -15,7 +17,11 @@ type ReadCertCmd struct {
 }
 
 func (rcc *ReadCertCmd) Run() error {
-	cert, err := utils.ReadFile(rcc.Path)
+	fullPath, err := utils.JoinHomeDir(rcc.Path)
+	if err != nil {
+		return err
+	}
+	cert, err := utils.ReadFile(fullPath)
 	if err != nil {
 		return fmt.Errorf("file does not contains valid certificate")
 	}
@@ -25,15 +31,46 @@ func (rcc *ReadCertCmd) Run() error {
 }
 
 type ReadKeyCmd struct {
-	Path string `name:"path" short:"p" required:"" type:"path" help:"Path to read a file. file must be in (.key,.pem) format."`
+	Path    string `name:"path" short:"p" required:"" type:"path" help:"Path to read a file. file must be in (.key,.pem) format."`
+	Decrypt bool   `name:"decrypt" help:"Decrypt the Private key if it is stored as encrypted pem block."`
 }
 
 func (rkc *ReadKeyCmd) Run() error {
-	key, err := utils.ReadFile(rkc.Path)
+	fullPath, err := utils.JoinHomeDir(rkc.Path)
 	if err != nil {
-		return fmt.Errorf("file does not contains valid key")
+		return err
+	}
+	fileBytes, err := utils.ReadFile(fullPath)
+	if err != nil {
+		return err
 	}
 
-	fmt.Println(string(key))
+	block, _ := pem.Decode(fileBytes)
+	if block == nil {
+		return fmt.Errorf("file %s does not contains valid PEM encoded key", rkc.Path)
+	}
+
+	if rkc.Decrypt {
+		masterKey, err := utils.GetMasterKey()
+		if err != nil {
+			return err
+		}
+		decryptedKey, err := utils.Decrypt(block.Bytes, masterKey)
+		if err != nil {
+			return err
+		}
+
+		pemType := strings.TrimPrefix(block.Type, "ENCRYPTED ")
+
+		finalPem := pem.EncodeToMemory(&pem.Block{
+			Type:  pemType,
+			Bytes: decryptedKey,
+		})
+
+		fmt.Println(string(finalPem))
+		return nil
+	}
+
+	fmt.Println(string(fileBytes))
 	return nil
 }

@@ -26,7 +26,7 @@ func WriteCert(filePath string, certBytes []byte) error {
 
 // WriteKey takes a concrete key (e.g., *rsa.PrivateKey, *ecdsa.PrivateKey, ed25519.PrivateKey)
 // and dynamically handles legacy or PKCS#8 formatting.
-func WriteKey(filePath string, key any, keyType KeyType, usePKCS8 bool, usePKIX bool) error {
+func WriteKey(filePath string, key any, keyType KeyType, usePKCS8 bool, usePKIX bool, useCipher bool) error {
 	if keyType == PUBLIC && usePKIX {
 		pubBytes, err := x509.MarshalPKIXPublicKey(key)
 		if err != nil {
@@ -68,6 +68,18 @@ func WriteKey(filePath string, key any, keyType KeyType, usePKCS8 bool, usePKIX 
 				return fmt.Errorf("cannot marshal to PKCS#8: %v", err)
 			}
 		}
+	}
+	if useCipher {
+		masterKey, err := GetMasterKey()
+		if err != nil {
+			return fmt.Errorf("failed to retrieve master key for encryption: %w", err)
+		}
+		encryptedBytes, err := Encrypt(privBytes, masterKey)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt private key: %w", err)
+		}
+		privBytes = encryptedBytes
+		blockType = "ENCRYPTED " + blockType
 	}
 
 	return write(filePath, blockType, privBytes, 0o600)

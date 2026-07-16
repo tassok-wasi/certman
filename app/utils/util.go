@@ -2,6 +2,7 @@ package utils
 
 import (
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -156,4 +158,72 @@ func GetDeterministicPath(subjectCN, issuerCN string, isRootCA bool) (string, er
 		return JoinHomeDir(filepath.Join("~/certman/certificates/roots", sub))
 	}
 	return JoinHomeDir(filepath.Join("~/certman/certificates/issued_by", iss, sub))
+}
+
+func ParseKeyUsages(usages []string) []x509.KeyUsage {
+	var out []x509.KeyUsage
+	m := map[string]x509.KeyUsage{
+		"digital-signature":  x509.KeyUsageDigitalSignature,
+		"content-commitment": x509.KeyUsageContentCommitment,
+		"key-encipherment":   x509.KeyUsageKeyEncipherment,
+		"data-encipherment":  x509.KeyUsageDataEncipherment,
+		"key-agreement":      x509.KeyUsageKeyAgreement,
+		"cert-sign":          x509.KeyUsageCertSign,
+		"crl-sign":           x509.KeyUsageCRLSign,
+		"encipher-only":      x509.KeyUsageEncipherOnly,
+		"decipher-only":      x509.KeyUsageDecipherOnly,
+	}
+	for _, u := range usages {
+		if ku, exists := m[strings.ToLower(strings.TrimSpace(u))]; exists {
+			out = append(out, ku)
+		}
+	}
+	return out
+}
+
+func ParseExtKeyUsages(usages []string) []x509.ExtKeyUsage {
+	var out []x509.ExtKeyUsage
+	m := map[string]x509.ExtKeyUsage{
+		"any":              x509.ExtKeyUsageAny,
+		"server-auth":      x509.ExtKeyUsageServerAuth,
+		"client-auth":      x509.ExtKeyUsageClientAuth,
+		"code-signing":     x509.ExtKeyUsageCodeSigning,
+		"email-protection": x509.ExtKeyUsageEmailProtection,
+		"time-stamping":    x509.ExtKeyUsageTimeStamping,
+		"ocsp-signing":     x509.ExtKeyUsageOCSPSigning,
+	}
+	for _, u := range usages {
+		if eku, exists := m[strings.ToLower(strings.TrimSpace(u))]; exists {
+			out = append(out, eku)
+		}
+	}
+	return out
+}
+
+var durationRegex = regexp.MustCompile(`^(\d+)([hdy])$`)
+
+// ParseTTLToHours parses duration strings like "1000h", "30d", "10y" into total hours.
+func ParseTTLToHours(ttlStr string) (int, error) {
+	matches := durationRegex.FindStringSubmatch(ttlStr)
+	if len(matches) != 3 {
+		return 0, fmt.Errorf("invalid duration format %q: must be a number followed by 'h', 'd', or 'y' (e.g., 1000h, 30d, 10y)", ttlStr)
+	}
+
+	value, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return 0, fmt.Errorf("invalid number in duration: %v", err)
+	}
+
+	unit := matches[2]
+	switch unit {
+	case "h":
+		return value, nil
+	case "d":
+		return value * 24, nil
+	case "y":
+		// Approximating a year as 365 days (8760 hours)
+		return value * 24 * 365, nil
+	default:
+		return 0, fmt.Errorf("unsupported time unit: %s", unit)
+	}
 }

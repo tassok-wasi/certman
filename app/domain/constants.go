@@ -34,3 +34,8 @@ type SANs struct {
 	IPAddresses    []net.IP
 	URIs           []*url.URL
 }
+
+type KeyUsageConfig struct {
+	KeyUsages    []x509.KeyUsage
+	ExtKeyUsages []x509.ExtKeyUsage
+}

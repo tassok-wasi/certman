@@ -5,6 +5,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"os"
+	"strings"
 )
 
 func ReadFile(filePath string) ([]byte, error) {
@@ -44,7 +45,7 @@ func ReadCert(filePath string) (*x509.Certificate, error) {
 
 // ReadKey reads file and returns the pkcs#8 for private key and pkix for public key
 // filePath can be linux path, relative path, absolute path or just file name
-func ReadKey(filePath string) (any, error) {
+func ReadKey(filePath string, usedCipher bool) (any, error) {
 	fileBytes, err := ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("file does not contains valid key")
@@ -55,7 +56,24 @@ func ReadKey(filePath string) (any, error) {
 		return nil, fmt.Errorf("file %s does not contain PEM block", filePath)
 	}
 
-	key, err := ReturnKey(fileBytes, block.Type)
+	if usedCipher {
+		masterKey, err := GetMasterKey()
+		if err != nil {
+			return nil, err
+		}
+		decryptedKey, err := Decrypt(block.Bytes, masterKey)
+		if err != nil {
+			return nil, err
+		}
+
+		key, err := ReturnPrivateKey(decryptedKey)
+		if err != nil {
+			return nil, err
+		}
+		return key, nil
+	}
+
+	key, err := ReturnKey(block.Bytes, block.Type)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +81,7 @@ func ReadKey(filePath string) (any, error) {
 	return key, nil
 }
 
-func ReturnKeyWithBlockType(filePath string) (any, string, error) {
+func ReturnKeyWithBlockType(filePath string, usedCipher bool) (any, string, error) {
 	fileBytes, err := ReadFile(filePath)
 	if err != nil {
 		return nil, "", fmt.Errorf("file does not contains valid key")
@@ -74,12 +92,43 @@ func ReturnKeyWithBlockType(filePath string) (any, string, error) {
 		return nil, "", fmt.Errorf("file %s does not contain PEM block", filePath)
 	}
 
-	key, err := ReturnKey(fileBytes, block.Type)
+	if usedCipher {
+		masterKey, err := GetMasterKey()
+		if err != nil {
+			return nil, "", err
+		}
+		decryptedBytes, err := Decrypt(block.Bytes, masterKey)
+		if err != nil {
+			return nil, "", err
+		}
+
+		blockType := strings.TrimPrefix(block.Type, "ENCRYPTED ")
+		key, err := ReturnKey(decryptedBytes, blockType)
+		if err != nil {
+			return nil, "", err
+		}
+		return key, blockType, nil
+	}
+
+	key, err := ReturnKey(block.Bytes, block.Type)
 	if err != nil {
 		return nil, "", err
 	}
 
 	return key, block.Type, nil
+}
+
+func ReturnPrivateKey(keyBytes []byte) (any, error) {
+	if key, err := x509.ParsePKCS8PrivateKey(keyBytes); err == nil {
+		return key, nil
+	}
+	if key, err := x509.ParsePKCS1PrivateKey(keyBytes); err == nil {
+		return key, nil
+	}
+	if key, err := x509.ParseECPrivateKey(keyBytes); err == nil {
+		return key, nil
+	}
+	return nil, fmt.Errorf("unknown private key")
 }
 
 func ReturnKey(bytes []byte, blockType string) (any, error) {

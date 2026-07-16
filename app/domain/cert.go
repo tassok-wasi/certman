@@ -24,14 +24,29 @@ func GetBaseTemplate(subject pkix.Name, serialNumber *big.Int, ttlInHour int, is
 	}
 }
 
-func GetCA(subject pkix.Name, ttlInHour int, keyPair *KeyPair) (*x509.Certificate, error) {
+// GetCA generates a root CA certificate with dynamic key usages.
+func GetCA(subject pkix.Name, ttlInHour int, keyPair *KeyPair, usages *KeyUsageConfig) (*x509.Certificate, error) {
 	serialNumber, err := utils.GetSerialNumber()
 	if err != nil {
 		return nil, err
 	}
 
 	template := GetBaseTemplate(subject, serialNumber, ttlInHour, true)
-	template.KeyUsage = x509.KeyUsageCertSign | x509.KeyUsageCRLSign
+
+	// Apply dynamic key usages or fallback to standard CA defaults
+	if usages != nil && len(usages.KeyUsages) > 0 {
+		template.KeyUsage = 0
+		for _, ku := range usages.KeyUsages {
+			template.KeyUsage |= ku
+		}
+	} else {
+		template.KeyUsage = x509.KeyUsageCertSign | x509.KeyUsageCRLSign
+	}
+
+	// Apply dynamic extended key usages if provided
+	if usages != nil && len(usages.ExtKeyUsages) > 0 {
+		template.ExtKeyUsage = usages.ExtKeyUsages
+	}
 
 	// Self-signed CA: Subject Key ID and Authority Key ID match
 	skid, err := generateSKID(keyPair.PublicKey)
@@ -54,7 +69,8 @@ func GetCA(subject pkix.Name, ttlInHour int, keyPair *KeyPair) (*x509.Certificat
 	return caCert, nil
 }
 
-func GetIntermediate(subject pkix.Name, san SANs, ttlInHour int, keyPair *KeyPair, parent *Certificate) (*x509.Certificate, error) {
+// GetIntermediate generates an intermediate CA certificate with dynamic key usages.
+func GetIntermediate(subject pkix.Name, san SANs, ttlInHour int, keyPair *KeyPair, parent *Certificate, usages *KeyUsageConfig) (*x509.Certificate, error) {
 	if parent == nil || !parent.Cert.IsCA {
 		return nil, errors.New("invalid parent certificate: parent must be a valid CA")
 	}
@@ -70,7 +86,21 @@ func GetIntermediate(subject pkix.Name, san SANs, ttlInHour int, keyPair *KeyPai
 	template.MaxPathLen = 0
 	template.MaxPathLenZero = true // This intermediate can only sign leaf certs, not more CAs
 
-	template.KeyUsage = x509.KeyUsageCertSign | x509.KeyUsageCRLSign
+	// Apply dynamic key usages or fallback to standard CA defaults
+	if usages != nil && len(usages.KeyUsages) > 0 {
+		template.KeyUsage = 0
+		for _, ku := range usages.KeyUsages {
+			template.KeyUsage |= ku
+		}
+	} else {
+		template.KeyUsage = x509.KeyUsageCertSign | x509.KeyUsageCRLSign
+	}
+
+	// Apply dynamic extended key usages if provided
+	if usages != nil && len(usages.ExtKeyUsages) > 0 {
+		template.ExtKeyUsage = usages.ExtKeyUsages
+	}
+
 	template.DNSNames = san.DNSNames
 	template.EmailAddresses = san.EmailAddresses
 	template.IPAddresses = san.IPAddresses
@@ -96,7 +126,8 @@ func GetIntermediate(subject pkix.Name, san SANs, ttlInHour int, keyPair *KeyPai
 	return interCaCert, nil
 }
 
-func GetLeaf(subject pkix.Name, san SANs, ttlInHour int, keyPair *KeyPair, parent *Certificate) (*x509.Certificate, error) {
+// GetLeaf generates a leaf certificate with dynamic key usages.
+func GetLeaf(subject pkix.Name, san SANs, ttlInHour int, keyPair *KeyPair, parent *Certificate, usages *KeyUsageConfig) (*x509.Certificate, error) {
 	if parent == nil || !parent.Cert.IsCA {
 		return nil, fmt.Errorf("invalid parent certificate: leaf must be signed by a CA/Intermediate")
 	}
@@ -107,8 +138,24 @@ func GetLeaf(subject pkix.Name, san SANs, ttlInHour int, keyPair *KeyPair, paren
 	}
 
 	template := GetBaseTemplate(subject, serialNumber, ttlInHour, false)
-	template.KeyUsage = x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment
-	template.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth}
+
+	// Apply dynamic key usages or fallback to standard Leaf defaults
+	if usages != nil && len(usages.KeyUsages) > 0 {
+		template.KeyUsage = 0
+		for _, ku := range usages.KeyUsages {
+			template.KeyUsage |= ku
+		}
+	} else {
+		template.KeyUsage = x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment
+	}
+
+	// Apply dynamic extended key usages or fallback to standard Server/Client Auth defaults
+	if usages != nil && len(usages.ExtKeyUsages) > 0 {
+		template.ExtKeyUsage = usages.ExtKeyUsages
+	} else {
+		template.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth}
+	}
+
 	template.DNSNames = san.DNSNames
 	template.EmailAddresses = san.EmailAddresses
 	template.IPAddresses = san.IPAddresses

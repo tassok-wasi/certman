@@ -4,10 +4,14 @@ import (
 	"certman/app/utils"
 	"crypto/ecdsa"
 	"crypto/ed25519"
-	"crypto/elliptic"
 	"crypto/rsa"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -18,17 +22,66 @@ type InspectCmd struct {
 }
 
 type InspectCertCmd struct {
-	Path string `name:"path" short:"p" required:"" type:"path" help:"Path to read a file. file must be in (.cert) format."`
+	Path        string `name:"path" short:"p" required:"" type:"path" help:"Path to read a file. file must be in (.cert) format."`
+	Fingerprint bool   `name:"fingerprint" short:"f" help:"Display SHA-1 and SHA-256 fingerprints."`
+	Extensions  bool   `name:"extensions" short:"e" help:"Display X.509 structural extension usage flags (Key Usage, CA flags)."`
+	JSON        bool   `name:"json" short:"j" help:"Output certificate details in raw JSON format for scripting."`
+}
+
+type certJSONOutput struct {
+	Subject      string   `json:"subject"`
+	Issuer       string   `json:"issuer"`
+	SerialNumber string   `json:"serial_number"`
+	SignatureAlg string   `json:"signature_algorithm"`
+	KeyAlgo      string   `json:"key_algorithm"`
+	KeySize      string   `json:"key_size"`
+	NotBefore    string   `json:"not_before"`
+	NotAfter     string   `json:"not_after"`
+	DNSNames     []string `json:"dns_names,omitempty"`
+	IPAddresses  []string `json:"ip_addresses,omitempty"`
+	SHA256       string   `json:"sha256_fingerprint,omitempty"`
 }
 
 func (icc *InspectCertCmd) Run() error {
-	cert, err := utils.ReadCert(icc.Path)
+	fullPath, err := utils.JoinHomeDir(icc.Path)
+	if err != nil {
+		return err
+	}
+	cert, err := utils.ReadCert(fullPath)
 	if err != nil {
 		return err
 	}
 
 	keyAlgo, keySize := getKeyDetails(cert.PublicKey)
 
+	if icc.JSON {
+		out := certJSONOutput{
+			Subject:      formatDN(cert.Subject),
+			Issuer:       formatDN(cert.Issuer),
+			SerialNumber: fmt.Sprintf("%x", cert.SerialNumber),
+			SignatureAlg: cert.SignatureAlgorithm.String(),
+			KeyAlgo:      keyAlgo,
+			KeySize:      keySize,
+			NotBefore:    cert.NotBefore.Format("2006-01-02 15:04:05 UTC"),
+			NotAfter:     cert.NotAfter.Format("2006-01-02 15:04:05 UTC"),
+			DNSNames:     cert.DNSNames,
+		}
+		for _, ip := range cert.IPAddresses {
+			out.IPAddresses = append(out.IPAddresses, ip.String())
+		}
+		if icc.Fingerprint {
+			sum256 := sha256.Sum256(cert.Raw)
+			out.SHA256 = formatFingerprint(sum256[:])
+		}
+		jsonBytes, err := json.MarshalIndent(out, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal JSON: %w", err)
+		}
+		fmt.Println(string(jsonBytes))
+		return nil
+	}
+
+	// --- Default Pretty Print Output ---
 	fmt.Println("Certificate Inspection Report")
 	fmt.Println(strings.Repeat("─", 50))
 
@@ -80,15 +133,64 @@ func (icc *InspectCertCmd) Run() error {
 		fmt.Println(strings.Repeat("─", 50))
 	}
 
+	// --- Handle --fingerprint flag ---
+	if icc.Fingerprint {
+		fmt.Println("  [ Certificate Fingerprints ]")
+		sum1 := sha1.Sum(cert.Raw)
+		sum256 := sha256.Sum256(cert.Raw)
+		fmt.Printf("    • SHA-1  : %s\n", formatFingerprint(sum1[:]))
+		fmt.Printf("    • SHA-256: %s\n", formatFingerprint(sum256[:]))
+		fmt.Println(strings.Repeat("─", 50))
+	}
+
+	// --- Handle --extensions flag ---
+	if icc.Extensions {
+		fmt.Println("  [ Key Usage & Extensions ]")
+		fmt.Printf("    • Basic Constraints (CA): %t\n", cert.IsCA)
+
+		// Parse Key Usages
+		var usages []string
+		usageMap := map[x509.KeyUsage]string{
+			x509.KeyUsageDigitalSignature:  "Digital Signature",
+			x509.KeyUsageContentCommitment: "Content Commitment",
+			x509.KeyUsageKeyEncipherment:   "Key Encipherment",
+			x509.KeyUsageDataEncipherment:  "Data Encipherment",
+			x509.KeyUsageKeyAgreement:      "Key Agreement",
+			x509.KeyUsageCertSign:          "Certificate Signing",
+			x509.KeyUsageCRLSign:           "CRL Signing",
+		}
+		for flag, name := range usageMap {
+			if cert.KeyUsage&flag != 0 {
+				usages = append(usages, name)
+			}
+		}
+		if len(usages) > 0 {
+			fmt.Printf("    • Intended Key Usages   : %s\n", strings.Join(usages, ", "))
+		} else {
+			fmt.Println("    • Intended Key Usages   : None Specified")
+		}
+		fmt.Println(strings.Repeat("─", 50))
+	}
+
 	return nil
 }
 
 type InspectKeyCmd struct {
-	Path string `name:"path" short:"p" required:"" type:"path" help:"Path to read a file. file must be in (.key,.pem) format."`
+	Path     string `name:"path" short:"p" required:"" type:"path" help:"Path to read a file. file must be in (.key,.pem) format."`
+	Validate bool   `name:"validate" short:"v" help:"Verify the mathematical integrity and validity of the private key."`
+	Decrypt  bool   `name:"decrypt" help:"Decrypt the Private key if it is stored as encrypted pem block."`
 }
 
 func (ikc *InspectKeyCmd) Run() error {
-	key, blockType, err := utils.ReturnKeyWithBlockType(ikc.Path)
+	usedCipher := false
+	if ikc.Decrypt {
+		usedCipher = true
+	}
+	fullPath, err := utils.JoinHomeDir(ikc.Path)
+	if err != nil {
+		return err
+	}
+	key, blockType, err := utils.ReturnKeyWithBlockType(fullPath, usedCipher)
 	if err != nil {
 		return err
 	}
@@ -109,6 +211,15 @@ func (ikc *InspectKeyCmd) Run() error {
 		fmt.Printf("  • Prime Factor (P) Size : %d bits\n", len(k.Primes[0].Bytes())*8)
 		fmt.Printf("  • Prime Factor (Q) Size : %d bits\n", len(k.Primes[1].Bytes())*8)
 
+		// Check internal sanity variables if requested
+		if ikc.Validate {
+			if err := k.Validate(); err != nil {
+				fmt.Printf("  • Validation Status     : Invalid Key! (%s)\n", err.Error())
+			} else {
+				fmt.Println("  • Validation Status     :  Mathematical Integrity Intact")
+			}
+		}
+
 	case *rsa.PublicKey:
 		fmt.Println("  • Key Paradigm          : Public (Sharable)")
 		fmt.Println("  • Cipher Suite          : RSA (Rivest–Shamir–Adleman)")
@@ -123,17 +234,37 @@ func (ikc *InspectKeyCmd) Run() error {
 		fmt.Printf("  • Chosen Curve Architecture: %s\n", k.Params().Name)
 		fmt.Printf("  • Order Limit (N)       : %s...\n", truncateHex(k.Params().N.Bytes()))
 		fmt.Printf("  • Private Scalar D      : [Protected / Hidden in Memory]\n")
-		// Safely extract the matching Public Key coordinates using modern standard conventions
-		pubBytes := elliptic.Marshal(k.Curve, k.X, k.Y)
+		pubBytes, err := k.Bytes()
+		if err != nil {
+			return err
+		}
 		fmt.Printf("  • Linked Uncompressed Point (X, Y): %s...\n", truncateHex(pubBytes))
+
+		if ikc.Validate {
+			if _, err := k.ECDH(); err == nil {
+				fmt.Println("  • Validation Status     :  Curve Point Verification Successful")
+			} else {
+				fmt.Println("  • Validation Status     : Invalid Key! Point is off the curve.")
+			}
+		}
 
 	case *ecdsa.PublicKey:
 		fmt.Println("  • Key Paradigm          : Public (Sharable)")
 		fmt.Println("  • Cipher Suite          : ECDSA (Elliptic Curve Digital Signature)")
 		fmt.Printf("  • Chosen Curve Architecture: %s\n", k.Params().Name)
-		// Safely extract point layout to avoid using deprecated direct .X or .Y coordinate properties
-		pubBytes := elliptic.Marshal(k.Curve, k.X, k.Y)
+		pubBytes, err := k.Bytes()
+		if err != nil {
+			return err
+		}
 		fmt.Printf("  • Uncompressed Point (X, Y): %s...\n", truncateHex(pubBytes))
+
+		if ikc.Validate {
+			if _, err := k.ECDH(); err == nil {
+				fmt.Println("  • Validation Status     :  Curve Point Verification Successful")
+			} else {
+				fmt.Println("  • Validation Status     : Invalid Key! Point is off the curve.")
+			}
+		}
 
 	// ==================== ED25519 KEY TYPES ====================
 	case ed25519.PrivateKey:
@@ -142,7 +273,10 @@ func (ikc *InspectKeyCmd) Run() error {
 		fmt.Println("  • Parameters            : Twisted Edwards Curve, Curve25519 base")
 		fmt.Printf("  • Key Seed Payload      : %s...\n", truncateHex(k.Seed()))
 
-		pub, _ := k.Public().(ed25519.PublicKey)
+		pub, ok := k.Public().(ed25519.PublicKey)
+		if !ok {
+			return errors.New("failed to assert ed25519 private key")
+		}
 		fmt.Printf("  • Extracted Public Key  : %s\n", hex.EncodeToString(pub))
 
 	case ed25519.PublicKey:
@@ -159,7 +293,7 @@ func (ikc *InspectKeyCmd) Run() error {
 	return nil
 }
 
-// FormatDN builds a clean, readable string from a pkix.Name struct (e.g., "CN=MyRoot, O=MyOrg, C=US")
+// Helper formatting functions
 func formatDN(name pkix.Name) string {
 	var parts []string
 
@@ -190,7 +324,6 @@ func formatDN(name pkix.Name) string {
 
 func getKeyDetails(key any) (algoType string, sizeInfo string) {
 	switch k := key.(type) {
-	// --- Private Key Types ---
 	case *rsa.PrivateKey:
 		algoType = "RSA Private Key"
 		sizeInfo = fmt.Sprintf("%d-bit", k.Size()*8)
@@ -200,8 +333,6 @@ func getKeyDetails(key any) (algoType string, sizeInfo string) {
 	case ed25519.PrivateKey:
 		algoType = "Ed25519 Private Key"
 		sizeInfo = "256-bit seed"
-
-	// --- Public Key Types ---
 	case *rsa.PublicKey:
 		algoType = "RSA Public Key"
 		sizeInfo = fmt.Sprintf("%d-bit", k.Size()*8)
@@ -211,12 +342,10 @@ func getKeyDetails(key any) (algoType string, sizeInfo string) {
 	case ed25519.PublicKey:
 		algoType = "Ed25519 Public Key"
 		sizeInfo = "256-bit"
-
 	default:
 		algoType = fmt.Sprintf("Unknown (%T)", key)
 		sizeInfo = "N/A"
 	}
-
 	return algoType, sizeInfo
 }
 
@@ -229,4 +358,13 @@ func truncateHex(b []byte) string {
 		return fullHex[:32]
 	}
 	return fullHex
+}
+
+// Formats a byte slice fingerprint into standard double-spaced format (e.g., "AA:BB:CC:...")
+func formatFingerprint(b []byte) string {
+	var parts []string
+	for _, val := range b {
+		parts = append(parts, fmt.Sprintf("%02X", val))
+	}
+	return strings.Join(parts, ":")
 }

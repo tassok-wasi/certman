@@ -22,8 +22,10 @@ type CACmd struct {
 	StreetAddress      []string `name:"street-addrs" help:"StreetAddress names of the Certificate"`
 	PostalCode         []string `name:"post" help:"PostalCode of the Certificate."`
 	KeyType            string   `name:"key-type" enum:"rsa-2048,rsa-4096,ecdsa-224,ecdsa-256,ecdsa-384,ecdsa-521,ed25519" default:"ed25519" help:"key-type specifies the Key will be used to sign the Certificate."`
-	TTL                int      `name:"ttl" help:"ttl in Hours."`
+	TTL                string   `name:"ttl" help:"Time-To-Live of the certificate (e.g., 1000h, 30d, 10y)." default:"86400h"`
 	IT                 bool     `name:"it" help:"Bypass the flags and provide input via interactive prompt"`
+
+	KeyUsages []string `name:"key-usage" help:"Custom key usages (comma-separated or multiple flags). e.g: cert-sign, crl-sign"`
 }
 
 func CAPrompt(initial *CACmd) (*CACmd, error) {
@@ -38,10 +40,12 @@ func CAPrompt(initial *CACmd) (*CACmd, error) {
 		posts      = strings.Join(initial.PostalCode, ", ")
 		keyType    = initial.KeyType
 		ttlStr     string
+
+		keyUsages = initial.KeyUsages
 	)
 
-	if initial.TTL > 0 {
-		ttlStr = strconv.Itoa(initial.TTL)
+	if len(keyUsages) == 0 {
+		keyUsages = []string{"cert-sign", "crl-sign"}
 	}
 
 	form := huh.NewForm(
@@ -63,13 +67,24 @@ func CAPrompt(initial *CACmd) (*CACmd, error) {
 					huh.NewOption("ECDSA 521", "ecdsa-521"),
 					huh.NewOption("Ed25519", "ed25519"),
 				).Value(&keyType),
-			huh.NewInput().Title("TTL (Hours)").Value(&ttlStr).Validate(func(s string) error {
-				_, err := strconv.Atoi(s)
-				if err != nil {
-					return fmt.Errorf("must be a valid numeric duration integer above 0")
-				}
-				return nil
+			huh.NewInput().Title("TTL (Time To Live)").
+				Description("Specify duration, e.g., 1000h (hours), 30d (days), 10y (years)").
+				Value(&ttlStr).Validate(func(str string) error {
+				_, err := utils.ParseTTLToHours(str)
+				return err
 			}),
+			huh.NewMultiSelect[string]().
+				Title("Allowed Key Usages").
+				Description("Choose cryptographic actions this CA is permitted to perform").
+				Options(
+					huh.NewOption("Certificate Signing (Default)", "cert-sign"),
+					huh.NewOption("CRL Signing (Default)", "crl-sign"),
+					huh.NewOption("Digital Signature", "digital-signature"),
+					huh.NewOption("Content Commitment", "content-commitment"),
+					huh.NewOption("Key Encipherment", "key-encipherment"),
+					huh.NewOption("Data Encipherment", "data-encipherment"),
+					huh.NewOption("Key Agreement", "key-agreement"),
+				).Value(&keyUsages),
 		),
 		huh.NewGroup(
 			huh.NewInput().Title("Countries (comma separated)").Value(&countries),
@@ -82,13 +97,14 @@ func CAPrompt(initial *CACmd) (*CACmd, error) {
 		),
 	)
 
-	// Step 3: Launch form rendering
 	if err := form.Run(); err != nil {
 		return nil, err
 	}
 
-	// Step 4: Export terminal text cleanly back into a fresh struct instance
-	parsedTTL, _ := strconv.Atoi(ttlStr)
+	parsedTTL, err := utils.ParseTTLToHours(ttlStr)
+	if err != nil {
+		return nil, err
+	}
 	return &CACmd{
 		CommonName:         strings.TrimSpace(cn),
 		Country:            utils.SplitCSV(countries),
@@ -99,15 +115,16 @@ func CAPrompt(initial *CACmd) (*CACmd, error) {
 		StreetAddress:      utils.SplitCSV(streets),
 		PostalCode:         utils.SplitCSV(posts),
 		KeyType:            keyType,
-		TTL:                parsedTTL,
+		TTL:                strconv.Itoa(parsedTTL),
 		IT:                 true,
+		KeyUsages:          keyUsages,
 	}, nil
 }
 
-func (c *CACmd) Run(registry *DataRegistry) error {
-	finalConfig := c
-	if c.IT {
-		promptResult, err := CAPrompt(c)
+func (cc *CACmd) Run(registry *DataRegistry) error {
+	finalConfig := cc
+	if cc.IT {
+		promptResult, err := CAPrompt(cc)
 		if err != nil {
 			return fmt.Errorf("prompt cancelled: %w", err)
 		}
@@ -119,16 +136,26 @@ func (c *CACmd) Run(registry *DataRegistry) error {
 		if finalConfig.KeyType == "" {
 			return fmt.Errorf("missing required flag: --key-type")
 		}
-		if finalConfig.TTL <= 0 {
-			return fmt.Errorf("missing required flag: --ttl must be greater than 0")
+		hours, err := utils.ParseTTLToHours(cc.TTL)
+		if err != nil {
+			return fmt.Errorf("invalid entry for --ttl: %v", err)
 		}
+		finalConfig.TTL = strconv.Itoa(hours)
 	}
 
 	keyPair, err := domain.GetKey(domain.KeyType(finalConfig.KeyType))
 	if err != nil {
-		return fmt.Errorf("unsupported key type: %s", c.KeyType)
+		return fmt.Errorf("unsupported key type: %s", finalConfig.KeyType)
 	}
 
+	usages := &domain.KeyUsageConfig{
+		KeyUsages: utils.ParseKeyUsages(finalConfig.KeyUsages),
+	}
+
+	ttl, err := strconv.Atoi(finalConfig.TTL)
+	if err != nil {
+		return err
+	}
 	caCert, err := domain.GetCA(pkix.Name{
 		Country:            finalConfig.Country,
 		Organization:       finalConfig.Organization,
@@ -138,9 +165,9 @@ func (c *CACmd) Run(registry *DataRegistry) error {
 		StreetAddress:      finalConfig.StreetAddress,
 		PostalCode:         finalConfig.PostalCode,
 		CommonName:         finalConfig.CommonName,
-	}, finalConfig.TTL, keyPair)
+	}, ttl, keyPair, usages)
 	if err != nil {
-		return fmt.Errorf("cannot generate CA Certificate")
+		return fmt.Errorf("cannot generate CA Certificate: %w", err)
 	}
 
 	registry.Certificate = caCert
