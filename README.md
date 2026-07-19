@@ -1,3 +1,5 @@
+> ⚠️ **Note:** This repository is currently a Work in Progress (WIP). It is not fully complete, and features may change or be broken.
+
 # certman – Certificate Management Toolkit
 
 **certman** is a command-line tool for generating, inspecting, verifying, and managing X.509 certificates and private keys. It supports **Root CAs**, **Intermediate CAs**, and **Leaf** certificates with flexible key algorithms, custom key usages, and encrypted private keys using the OS keyring.
