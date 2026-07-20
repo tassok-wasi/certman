@@ -1,4 +1,4 @@
-> ⚠️ **Note:** This repository is currently a Work in Progress (WIP). It is not fully complete, and features may change or be broken.
+> ⚠️ **Note:** This repository is currently a Work in Progress (WIP). It is not fully complete, and features may change or be broken. And the `README` isn't updated yet.
 
 # certman – Certificate Management Toolkit
 
