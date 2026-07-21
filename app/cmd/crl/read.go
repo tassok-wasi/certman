@@ -9,13 +9,13 @@ import (
 )
 
 type ReadCmd struct {
-	CRLName string `name:"crl-name" aliases:"crl" help:"DB recorded CRL Name."`
+	ID int64 `arg:"" help:"ID of the CRL to Read."`
 }
 
 func (rc *ReadCmd) Run(ctx context.Context, query base.Querier) error {
-	crl, err := query.GetCRLByName(ctx, rc.CRLName)
+	crl, err := query.GetCRLByID(ctx, rc.ID)
 	if err != nil {
-		return fmt.Errorf("failed to get crl: %w", err)
+		return fmt.Errorf("failed to get CRL from db: %w", err)
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)

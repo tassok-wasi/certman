@@ -7,44 +7,25 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rsa"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"log"
 )
 
 type VerifyCmd struct {
-	SerialNumber string `name:"sn" xor:"own" help:"Serial Number of the Certificate which private key needs to be verified."`
-	CommonName   string `name:"cn" xor:"own" help:"Common Name of the Certificate which private key needs to be verified."`
+	ID int `arg:"" help:"ID of the Certificate to Verify."`
 }
 
 func (vc *VerifyCmd) Run(ctx context.Context, query base.Querier) error {
-	var cert *x509.Certificate
-	var keyName string
-
-	if vc.SerialNumber != "" && vc.CommonName == "" {
-		dbCert, err := query.GetCertificateBySN(ctx, vc.SerialNumber)
-		if err != nil {
-			return fmt.Errorf("failed to get Certificate: %w", err)
-		}
-		keyName = dbCert.KeyName
-		cert, err = utils.ParseCertificate([]byte(dbCert.CertificatePem))
-		if err != nil {
-			return err
-		}
-	} else if vc.SerialNumber == "" && vc.CommonName != "" {
-		dbCert, err := query.GetCertificateByCN(ctx, vc.CommonName)
-		if err != nil {
-			return fmt.Errorf("failed to get Certificate: %w", err)
-		}
-		keyName = dbCert.KeyName
-		cert, err = utils.ParseCertificate([]byte(dbCert.CertificatePem))
-		if err != nil {
-			return err
-		}
-	} else {
-		return errors.New("exactly one flag (--sn or --cn) must be provided")
+	dbCert, err := query.GetCertificateByID(ctx, int64(vc.ID))
+	if err != nil {
+		return fmt.Errorf("failed to get Certificate from db: %w", err)
 	}
+	cert, err := utils.ParseCertificate([]byte(dbCert.CertificatePem))
+	if err != nil {
+		return err
+	}
+	var keyName string
 
 	keys, err := query.GetKeyByName(ctx, keyName)
 	if err != nil {

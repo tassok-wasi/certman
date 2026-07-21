@@ -167,7 +167,7 @@ func TestGenerateSKID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			skid, err := generateSKID(tt.pubKey)
+			skid, err := GenerateSKID(tt.pubKey)
 			if (err != nil) != tt.expectErr {
 				t.Fatalf("generateSKID() error = %v, expectErr %v", err, tt.expectErr)
 			}

@@ -5,33 +5,19 @@ import (
 	"certman/db/base"
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 )
 
 type RevokeCmd struct {
-	SerialNumber string `name:"sn" xor:"own" help:"Serial Number of the Certificate."`
-	CommonName   string `name:"cn" xor:"own" help:"Common Name of the Certificate."`
-	Reason       string `name:"reason" short:"r" required:"" enum:"unspecified,key-compromise,ca-compromise,affiliation-changed,superseded,cessation-of-operation,certificate-hold,remove-from-crl,privilege-withdrawn,a-a-compromise" help:"Reason for revoking the Certificate."`
+	ID     int64  `arg:"" help:"Certificate ID"`
+	Reason string `name:"reason" short:"r" required:"" enum:"unspecified,key-compromise,ca-compromise,affiliation-changed,superseded,cessation-of-operation,certificate-hold,remove-from-crl,privilege-withdrawn,a-a-compromise" help:"Reason for revoking the Certificate."`
 }
 
 func (rc *RevokeCmd) Run(ctx context.Context, query base.Querier) error {
-	var dbCert base.Certificate
-	var err error
-
-	if rc.SerialNumber != "" && rc.CommonName == "" {
-		dbCert, err = query.GetCertificateBySN(ctx, rc.SerialNumber)
-		if err != nil {
-			return fmt.Errorf("failed to get Certificate: %w", err)
-		}
-	} else if rc.SerialNumber == "" && rc.CommonName != "" {
-		dbCert, err = query.GetCertificateByCN(ctx, rc.CommonName)
-		if err != nil {
-			return fmt.Errorf("failed to get Certificate: %w", err)
-		}
-	} else {
-		return errors.New("exactly one flag (--sn or --cn) must be provided")
+	dbCert, err := query.GetCertificateByID(ctx, rc.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get Certificate from db: %w", err)
 	}
 
 	if dbCert.IsRevoked.Int64 == 1 {

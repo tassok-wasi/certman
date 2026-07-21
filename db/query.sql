@@ -21,6 +21,7 @@ INSERT INTO certificates (
     issuer_serial_number,
     skid,
     akid,
+    status,
     not_before,
     not_after,
     certificate_pem
@@ -32,29 +33,51 @@ INSERT INTO certificates (
     sqlc.arg('issuer_serial_number'),
     sqlc.arg('skid'),
     sqlc.arg('akid'),
+    sqlc.arg('status'),
     sqlc.arg('not_before'),
     sqlc.arg('not_after'),
     sqlc.arg('certificate_pem')
 )
 RETURNING *;
 
--- name: TotalCertificates :one
-SELECT COUNT(*) AS total_count FROM certificates;
-
--- name: TotalKeys :one
-SELECT COUNT(*) AS total_keys FROM keys;
-
 -- name: ListCertificates :many
-SELECT serial_number, common_name, type, not_after, is_revoked
+SELECT id, serial_number, common_name, type, status, not_after, is_revoked
 FROM certificates
+WHERE
+    (CAST(sqlc.narg('status') AS TEXT) IS NULL OR status = CAST(sqlc.narg('status') AS TEXT))
+    AND (CAST(sqlc.narg('type') AS TEXT) IS NULL OR type = CAST(sqlc.narg('type') AS TEXT))
+ORDER BY id ASC
 LIMIT sqlc.arg('limit')
 OFFSET sqlc.arg('offset');
+
+-- name: ListAllCertificates :many
+SELECT id, serial_number, common_name, type, status, not_after, is_revoked
+FROM certificates
+WHERE
+    (CAST(sqlc.narg('status') AS TEXT) IS NULL OR status = CAST(sqlc.narg('status') AS TEXT))
+    AND (CAST(sqlc.narg('type') AS TEXT) IS NULL OR type = CAST(sqlc.narg('type') AS TEXT))
+ORDER BY id ASC;
 
 -- name: ListKeys :many
-SELECT name, algorithm, created_at
+SELECT id, name, algorithm, created_at
 FROM keys
+ORDER BY id ASC
 LIMIT sqlc.arg('limit')
 OFFSET sqlc.arg('offset');
+
+-- name: ListAllKeys :many
+SELECT id, name, algorithm, created_at
+FROM keys
+ORDER BY id ASC;
+
+-- name: GetKeyByID :one
+SELECT * FROM keys WHERE id = sqlc.arg('id');
+
+-- name: GetKeyByName :one
+SELECT * FROM keys WHERE name = sqlc.arg('name');
+
+-- name: GetCertificateByID :one
+SELECT * FROM certificates WHERE id = sqlc.arg('id');
 
 -- name: GetCertificateBySN :one
 SELECT * FROM certificates WHERE serial_number = sqlc.arg('serial_number');
@@ -65,8 +88,6 @@ SELECT * FROM certificates WHERE common_name = sqlc.arg('common_name');
 -- name: GetCertificateBySKID :one
 SELECT * FROM certificates WHERE skid = sqlc.arg('skid');
 
--- name: GetKeyByName :one
-SELECT * FROM keys WHERE name = sqlc.arg('name');
 
 -- name: UpdateCertificate :one
 UPDATE certificates
@@ -77,6 +98,7 @@ SET
   issuer_serial_number = COALESCE(sqlc.narg('issuer_serial_number'), issuer_serial_number),
   skid = COALESCE(sqlc.narg('skid'), skid),
   akid = COALESCE(sqlc.narg('akid'), akid),
+  status = COALESCE(sqlc.narg('status'), status),
   not_before = COALESCE(sqlc.narg('not_before'), not_before),
   not_after = COALESCE(sqlc.narg('not_after'), not_after),
   certificate_pem = COALESCE(sqlc.narg('certificate_pem'), certificate_pem)
@@ -88,15 +110,26 @@ UPDATE certificates
 SET
     is_revoked = COALESCE(sqlc.arg('is_revoked'), is_revoked),
     revocation_reason = COALESCE(sqlc.arg('revocation_reason'), revocation_reason),
-    revocation_time = COALESCE(sqlc.arg('revocation_time'), revocation_time)
+    revocation_time = COALESCE(sqlc.arg('revocation_time'), revocation_time),
+    status = COALESCE(sqlc.arg('status'), status)
 WHERE serial_number = sqlc.arg('serial_number')
 RETURNING *;
 
--- name: GetRevokedCertificates :many
+-- name: ListRevokedCertificates :many
 SELECT * FROM certificates
 WHERE
     issuer_serial_number = sqlc.arg('issuer_serial_number')
-AND is_revoked = 1;
+    AND is_revoked = 1
+ORDER BY id ASC
+LIMIT sqlc.arg('limit')
+OFFSET sqlc.arg('offset');
+
+-- name: ListAllRevokedCertificates :many
+SELECT * FROM certificates
+WHERE
+    issuer_serial_number = sqlc.arg('issuer_serial_number')
+    AND is_revoked = 1
+ORDER BY id ASC;
 
 -- name: CreateCRL :one
 INSERT INTO crls (
@@ -116,11 +149,69 @@ INSERT INTO crls (
 )
 RETURNING *;
 
--- name: GetLatestCRLNumber :one
-SELECT crl_number FROM crls WHERE issuer_serial_number = sqlc.arg('issuer_serial_number') ORDER BY created_at DESC LIMIT 1;
+-- name: GetLatestCRL :one
+SELECT
+    name,
+    crl_number,
+    issuer_serial_number,
+    this_update,
+    next_update,
+    crl_pem
+FROM crls
+WHERE issuer_serial_number = sqlc.arg('issuer_serial_number')
+ORDER BY created_at DESC
+LIMIT 1;
 
--- name: GetAllCRL :many
-SELECT * FROM crls WHERE issuer_serial_number = sqlc.arg('issuer_serial_number');
+-- name: ListCRLs :many
+SELECT * FROM crls
+WHERE issuer_serial_number = sqlc.arg('issuer_serial_number')
+ORDER BY id ASC
+LIMIT sqlc.arg('limit')
+OFFSET sqlc.arg('offset');
 
--- name: GetCRLByName :one
-SELECT * FROM crls WHERE name = sqlc.arg('name');
+-- name: ListAllCRLs :many
+SELECT * FROM crls
+WHERE issuer_serial_number = sqlc.arg('issuer_serial_number')
+ORDER BY id ASC;
+
+
+-- name: GetCRLByID :one
+SELECT * FROM crls WHERE id = sqlc.arg('id');
+
+-- name: CreateCSR :one
+INSERT INTO csrs (
+    common_name,
+    key_name,
+    status,
+    csr_pem,
+    certificate_serial_number
+) VALUES (
+    sqlc.arg('common_name'),
+    sqlc.arg('key_name'),
+    sqlc.arg('status'),
+    sqlc.arg('csr_pem'),
+    sqlc.arg('certificate_serial_number')
+)
+RETURNING *;
+
+-- name: ListCSRs :many
+SELECT id, common_name, key_name, status, csr_pem, certificate_serial_number
+FROM csrs
+WHERE (CAST(sqlc.narg('status') AS TEXT) IS NULL OR status = CAST(sqlc.narg('status') AS TEXT))
+ORDER BY id ASC
+LIMIT sqlc.arg('limit')
+OFFSET sqlc.arg('offset');
+
+-- name: ListAllCSRs :many
+SELECT id, common_name, key_name, status, csr_pem, certificate_serial_number
+FROM csrs
+WHERE (CAST(sqlc.narg('status') AS TEXT) IS NULL OR status = CAST(sqlc.narg('status') AS TEXT))
+ORDER BY id ASC;
+
+-- name: UpdateCSRStatus :exec
+UPDATE csrs
+SET status = sqlc.arg('status'), certificate_serial_number = sqlc.arg('certificate_serial_number')
+WHERE common_name = sqlc.arg('common_name');
+
+-- name: GetCSRByID :one
+SELECT * FROM csrs WHERE id = sqlc.arg('id');

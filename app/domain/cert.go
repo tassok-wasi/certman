@@ -49,7 +49,7 @@ func GetCA(subject pkix.Name, ttlInHour int, keyPair *KeyPair, usages *KeyUsageC
 	}
 
 	// Self-signed CA: Subject Key ID and Authority Key ID match
-	skid, err := generateSKID(keyPair.PublicKey)
+	skid, err := GenerateSKID(keyPair.PublicKey)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func GetICA(subject pkix.Name, san SANs, ttlInHour int, keyPair *KeyPair, parent
 	template.URIs = san.URIs
 
 	// Key Identifiers
-	template.SubjectKeyId, err = generateSKID(keyPair.PublicKey)
+	template.SubjectKeyId, err = GenerateSKID(keyPair.PublicKey)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +162,7 @@ func GetLeaf(subject pkix.Name, san SANs, ttlInHour int, keyPair *KeyPair, paren
 	template.URIs = san.URIs
 
 	// Key Identifiers
-	template.SubjectKeyId, err = generateSKID(keyPair.PublicKey)
+	template.SubjectKeyId, err = GenerateSKID(keyPair.PublicKey)
 	if err != nil {
 		return nil, err
 	}

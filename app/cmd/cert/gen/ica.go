@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -35,20 +34,19 @@ type ICACmd struct {
 	KeyUsages          []string `name:"ku" enum:"digital-signature,content-commitment,key-encipherment,data-encipherment,key-agreement,cert-sign,crl-sign,encipher-only,decipher-only" help:"Custom key usages (comma-separated or multiple flags)."`
 	ExtKeyUsages       []string `name:"eku" enum:"any,server-auth,client-auth,code-signing,email-protection,time-stamping,ocsp-signing" help:"Custom extended key usages (comma-separated or multiple flags)."`
 
-	ISerialNumber string `name:"isn" xor:"issuer" help:"Serial Number of the Issuer Certificate."`
-	ICommonName   string `name:"icn" xor:"issuer" help:"Common Name of the Issuer Certificate."`
+	IssuerId int64 `name:"id" help:"Issuer Certificate ID"`
 }
 
-func (icc *ICACmd) Run(ctx context.Context, db *sql.DB, query base.Querier) error {
-	hours, err := utils.ParseTTLToHours(icc.TTL)
+func (ic *ICACmd) Run(ctx context.Context, db *sql.DB, query base.Querier) error {
+	hours, err := utils.ParseTTLToHours(ic.TTL)
 	if err != nil {
 		return fmt.Errorf("invalid entry for --ttl/-t: %v", err)
 	}
-	icc.TTL = strconv.Itoa(hours)
+	ic.TTL = strconv.Itoa(hours)
 
-	issuerDBCert, err := icc.fetchIssuerCertificate(ctx, query)
+	issuerDBCert, err := query.GetCertificateByID(ctx, ic.IssuerId)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get issuer Certificate from db: %w", err)
 	}
 	issuerCert, err := utils.ParseCertificate([]byte(issuerDBCert.CertificatePem))
 	if err != nil {
@@ -65,9 +63,9 @@ func (icc *ICACmd) Run(ctx context.Context, db *sql.DB, query base.Querier) erro
 		return err
 	}
 
-	keyPair, err := domain.GetKey(domain.KeyType(icc.KeyType))
+	keyPair, err := domain.GetKey(domain.KeyType(ic.KeyType))
 	if err != nil {
-		return fmt.Errorf("unsupported key type: %s", icc.KeyType)
+		return fmt.Errorf("unsupported key type: %s", ic.KeyType)
 	}
 
 	issuer := domain.Certificate{
@@ -78,28 +76,28 @@ func (icc *ICACmd) Run(ctx context.Context, db *sql.DB, query base.Querier) erro
 	}
 
 	usages := &domain.KeyUsageConfig{
-		KeyUsages:    utils.ParseKeyUsages(icc.KeyUsages),
-		ExtKeyUsages: utils.ParseExtKeyUsages(icc.ExtKeyUsages),
+		KeyUsages:    utils.ParseKeyUsages(ic.KeyUsages),
+		ExtKeyUsages: utils.ParseExtKeyUsages(ic.ExtKeyUsages),
 	}
 
-	ttl, err := strconv.Atoi(icc.TTL)
+	ttl, err := strconv.Atoi(ic.TTL)
 	if err != nil {
 		return err
 	}
 	icaCert, err := domain.GetICA(pkix.Name{
-		Country:            icc.Country,
-		Organization:       icc.Organization,
-		OrganizationalUnit: icc.OrganizationalUnit,
-		Locality:           icc.Locality,
-		Province:           icc.Province,
-		StreetAddress:      icc.StreetAddress,
-		PostalCode:         icc.PostalCode,
-		CommonName:         icc.CommonName,
+		Country:            ic.Country,
+		Organization:       ic.Organization,
+		OrganizationalUnit: ic.OrganizationalUnit,
+		Locality:           ic.Locality,
+		Province:           ic.Province,
+		StreetAddress:      ic.StreetAddress,
+		PostalCode:         ic.PostalCode,
+		CommonName:         ic.CommonName,
 	}, domain.SANs{
-		DNSNames:       icc.DNSNames,
-		EmailAddresses: icc.EmailAddresses,
-		IPAddresses:    utils.ToNetIPs(icc.IPAddresses),
-		URIs:           utils.ToURLs(icc.URIs),
+		DNSNames:       ic.DNSNames,
+		EmailAddresses: ic.EmailAddresses,
+		IPAddresses:    utils.ToNetIPs(ic.IPAddresses),
+		URIs:           utils.ToURLs(ic.URIs),
 	}, ttl, keyPair, &issuer, usages)
 	if err != nil {
 		return fmt.Errorf("cannot generate Intermediate CA Certificate: %w", err)
@@ -122,8 +120,8 @@ func (icc *ICACmd) Run(ctx context.Context, db *sql.DB, query base.Querier) erro
 
 	err = _db_.RunInTx(ctx, db, func(txQuerier base.Querier) error {
 		key, err := txQuerier.CreateKeyPair(ctx, base.CreateKeyPairParams{
-			Name:          icaCert.Subject.CommonName,
-			Algorithm:     icc.KeyType,
+			Name:          utils.GenerateKeyName(icaCert.Subject.CommonName),
+			Algorithm:     ic.KeyType,
 			PrivateKeyPem: privBlobPem,
 			PublicKeyPem:  pubPem,
 		})
@@ -138,6 +136,7 @@ func (icc *ICACmd) Run(ctx context.Context, db *sql.DB, query base.Querier) erro
 			IssuerSerialNumber: sql.NullString{String: fmt.Sprintf("%x", issuer.Cert.SerialNumber), Valid: true},
 			Skid:               skidHex,
 			Akid:               akidHex,
+			Status:             "ACTIVE",
 			NotBefore:          icaCert.NotBefore,
 			NotAfter:           icaCert.NotAfter,
 			CertificatePem:     string(certPem),
@@ -156,22 +155,4 @@ func (icc *ICACmd) Run(ctx context.Context, db *sql.DB, query base.Querier) erro
 	log.Println("Success: successfully Created Certificate.")
 
 	return nil
-}
-
-func (icc *ICACmd) fetchIssuerCertificate(ctx context.Context, query base.Querier) (*base.Certificate, error) {
-	if icc.ISerialNumber != "" && icc.ICommonName == "" {
-		dbCert, err := query.GetCertificateBySN(ctx, icc.ISerialNumber)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get Certificate: %w", err)
-		}
-		return &dbCert, nil
-	} else if icc.ISerialNumber == "" && icc.ICommonName != "" {
-		dbCert, err := query.GetCertificateByCN(ctx, icc.ICommonName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get Certificate: %w", err)
-		}
-		return &dbCert, nil
-	} else {
-		return nil, errors.New("exactly one flag (--sn or --cn) must be provided")
-	}
 }

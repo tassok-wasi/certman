@@ -81,7 +81,7 @@ func GetKey(keyType KeyType) (*KeyPair, error) {
 }
 
 // Helper to generate a Subject Key Identifier from a public key
-func generateSKID(pubKey any) ([]byte, error) {
+func GenerateSKID(pubKey any) ([]byte, error) {
 	der, err := x509.MarshalPKIXPublicKey(pubKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate SKID using public key: %w", err)

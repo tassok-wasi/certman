@@ -12,16 +12,16 @@ import (
 )
 
 type ExportCmd struct {
-	Name   string `name:"key-name" aliases:"key" required:"" help:"Name of the Key Pair."`
+	ID     int    `arg:"" help:"ID of the Key to be Export."`
 	Path   string `name:"path" short:"p" type:"path" help:"Path to export the file. [file name must be omitted]"`
 	Format string `name:"format" short:"f" help:"Specific format to export (e.g.,pem,der)"`
 	Blob   bool   `name:"blob" short:"b" help:"If selected private key will be exported as encrypted blob encoded into PEM."`
 }
 
 func (ec *ExportCmd) Run(ctx context.Context, query base.Querier) error {
-	key, err := query.GetKeyByName(ctx, ec.Name)
+	key, err := query.GetKeyByID(ctx, int64(ec.ID))
 	if err != nil {
-		return fmt.Errorf("failed to get key: %w", err)
+		return fmt.Errorf("failed to get key from db: %w", err)
 	}
 
 	ext := ".pem"

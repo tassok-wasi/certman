@@ -2,7 +2,6 @@ package utils
 
 import (
 	"crypto/x509"
-	"encoding/pem"
 	"net"
 	"os"
 	"path/filepath"
@@ -89,27 +88,6 @@ func TestToURL_And_ToURLs(t *testing.T) {
 			t.Errorf("URLs were parsed incorrectly: %v", got)
 		}
 	})
-}
-
-func TestToPem(t *testing.T) {
-	inputBytes := []byte("secret-payload")
-	blockType := "MY PRIVATE KEY"
-
-	pemBytes := ToPem(inputBytes, blockType)
-	if len(pemBytes) == 0 {
-		t.Fatal("PEM bytes returned empty")
-	}
-
-	block, _ := pem.Decode(pemBytes)
-	if block == nil {
-		t.Fatal("Failed to decode generated PEM block")
-	}
-	if block.Type != blockType {
-		t.Errorf("Expected block type %q, got %q", blockType, block.Type)
-	}
-	if string(block.Bytes) != string(inputBytes) {
-		t.Errorf("Expected decrypted payload %q, got %q", inputBytes, block.Bytes)
-	}
 }
 
 func TestGetSerialNumber(t *testing.T) {

@@ -88,7 +88,7 @@ func (cc *CACmd) Run(ctx context.Context, db *sql.DB, query base.Querier) error 
 
 	err = _db_.RunInTx(ctx, db, func(txQuerier base.Querier) error {
 		key, err := txQuerier.CreateKeyPair(ctx, base.CreateKeyPairParams{
-			Name:          caCert.Subject.CommonName,
+			Name:          utils.GenerateKeyName(caCert.Subject.CommonName),
 			Algorithm:     cc.KeyType,
 			PrivateKeyPem: privBlobPem,
 			PublicKeyPem:  pubPem,
@@ -105,6 +105,7 @@ func (cc *CACmd) Run(ctx context.Context, db *sql.DB, query base.Querier) error 
 			IssuerSerialNumber: sql.NullString{String: "", Valid: false},
 			Skid:               skidHex,
 			Akid:               akidHex,
+			Status:             "ACTIVE",
 			NotBefore:          caCert.NotBefore,
 			NotAfter:           caCert.NotAfter,
 			CertificatePem:     string(certPem),

@@ -18,13 +18,12 @@ import (
 )
 
 type GenerateCmd struct {
-	ISerialNumber string `name:"isn" xor:"issuer" help:"Serial Number of the Issuer Certificate."`
-	ICommonName   string `name:"icn" xor:"issuer" help:"Common Name of the Issuer Certificate."`
-	TTL           string `name:"ttl" short:"t" default:"168h" required:"Next Update time for CRL (e.g., 168h, 7d, 10y)"`
+	IssuerID int64  `arg:"" help:"ID of the Issuer Certificate to Generate CRL."`
+	TTL      string `name:"ttl" short:"t" default:"168h" required:"Next Update time for CRL (e.g., 168h, 7d, 10y)"`
 }
 
 func (gc *GenerateCmd) Run(ctx context.Context, query base.Querier) error {
-	issuerDBCert, err := gc.fetchCertificate(ctx, query)
+	issuerDBCert, err := query.GetCertificateByID(ctx, gc.IssuerID)
 	if err != nil {
 		return err
 	}
@@ -37,7 +36,8 @@ func (gc *GenerateCmd) Run(ctx context.Context, query base.Querier) error {
 	if issuerDBCert.IsRevoked.Valid && issuerDBCert.IsRevoked.Int64 == 1 {
 		return fmt.Errorf("couldn't generate CRL: Issuer itself is Revoked")
 	}
-	revokedCerts, err := query.GetRevokedCertificates(ctx, sql.NullString{String: issuerDBCert.SerialNumber, Valid: true})
+	revokedCerts, err := query.ListAllRevokedCertificates(ctx,
+		sql.NullString{String: issuerDBCert.SerialNumber, Valid: true})
 	if err != nil {
 		return fmt.Errorf("could not get Revoked Certificates: %w", err)
 	}
@@ -46,13 +46,12 @@ func (gc *GenerateCmd) Run(ctx context.Context, query base.Querier) error {
 		return fmt.Errorf("no Certificate has been Revoked from this Issuer")
 	}
 
-	latestCRLNumber, err := query.GetLatestCRLNumber(ctx, issuerDBCert.SerialNumber)
-	var nextCRLNumber int64 = 1
-	if err == nil {
-		nextCRLNumber = latestCRLNumber + 1
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("failed to get latest CRL number: %w", err)
+	latestCRL, err := query.GetLatestCRL(ctx, issuerDBCert.SerialNumber)
+	if err != nil {
+		return fmt.Errorf("failed to get latest CRL: %w", err)
 	}
+
+	nextCRLNumber := int64(latestCRL.CrlNumber) + 1
 
 	issuerKey, err := query.GetKeyByName(ctx, issuerDBCert.KeyName)
 	if err != nil {
@@ -114,26 +113,6 @@ func (gc *GenerateCmd) Run(ctx context.Context, query base.Querier) error {
 		return fmt.Errorf("failed to save generated CRL to database: %w", err)
 	}
 	return nil
-}
-
-func (gc *GenerateCmd) fetchCertificate(ctx context.Context, query base.Querier) (*base.Certificate, error) {
-	var issuerDBCert base.Certificate
-	var err error
-
-	if gc.ISerialNumber != "" && gc.ICommonName == "" {
-		issuerDBCert, err = query.GetCertificateBySN(ctx, gc.ISerialNumber)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get Certificate: %w", err)
-		}
-	} else if gc.ISerialNumber == "" && gc.ICommonName != "" {
-		issuerDBCert, err = query.GetCertificateByCN(ctx, gc.ICommonName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get Certificate: %w", err)
-		}
-	} else {
-		return nil, errors.New("exactly one flag (--sn or --cn) must be provided")
-	}
-	return &issuerDBCert, nil
 }
 
 func (gc *GenerateCmd) mapRevokedCerts(revokedCerts []base.Certificate, now time.Time) ([]pkix.RevokedCertificate, error) {

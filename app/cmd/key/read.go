@@ -10,13 +10,13 @@ import (
 )
 
 type ReadCmd struct {
-	Name string `name:"key-name" aliases:"key" required:"" help:"Name of the Key Pair."`
+	ID int `arg:"" help:"ID of the Key to Read."`
 }
 
 func (rc *ReadCmd) Run(ctx context.Context, query base.Querier) error {
-	key, err := query.GetKeyByName(ctx, rc.Name)
+	key, err := query.GetKeyByID(ctx, int64(rc.ID))
 	if err != nil {
-		return fmt.Errorf("failed to get Key: %w", err)
+		return fmt.Errorf("failed to get Key from db: %w", err)
 	}
 
 	fmt.Printf("\u2022 Name: %s\n", key.Name)

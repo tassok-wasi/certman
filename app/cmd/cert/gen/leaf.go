@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -36,8 +35,7 @@ type LeafCmd struct {
 	KeyUsages          []string `name:"ku" enum:"digital-signature,content-commitment,key-encipherment,data-encipherment,key-agreement,cert-sign,crl-sign,encipher-only,decipher-only" help:"Custom key usages (comma-separated or multiple flags)."`
 	ExtKeyUsages       []string `name:"eku" enum:"any,server-auth,client-auth,code-signing,email-protection,time-stamping,ocsp-signing" help:"Custom extended key usages (comma-separated or multiple flags)."`
 
-	ISerialNumber string `name:"isn" xor:"issuer" help:"Serial Number of the Issuer Certificate."`
-	ICommonName   string `name:"icn" xor:"issuer" help:"Common Name of the Issuer Certificate."`
+	IssuerId int64 `name:"id" help:"Issuer Certificate ID"`
 }
 
 func (lc *LeafCmd) Run(ctx context.Context, db *sql.DB, query base.Querier) error {
@@ -47,9 +45,9 @@ func (lc *LeafCmd) Run(ctx context.Context, db *sql.DB, query base.Querier) erro
 	}
 	lc.TTL = strconv.Itoa(hours)
 
-	issuerDBCert, err := lc.fetchIssuerCertificate(ctx, query)
+	issuerDBCert, err := query.GetCertificateByID(ctx, lc.IssuerId)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get issuer Certificate from db: %w", err)
 	}
 	issuerCert, err := utils.ParseCertificate([]byte(issuerDBCert.CertificatePem))
 	if err != nil {
@@ -123,7 +121,7 @@ func (lc *LeafCmd) Run(ctx context.Context, db *sql.DB, query base.Querier) erro
 
 	err = _db_.RunInTx(ctx, db, func(txQuerier base.Querier) error {
 		key, err := txQuerier.CreateKeyPair(ctx, base.CreateKeyPairParams{
-			Name:          leafCert.Subject.CommonName,
+			Name:          utils.GenerateKeyName(leafCert.Subject.CommonName),
 			Algorithm:     lc.KeyType,
 			PrivateKeyPem: privBlobPem,
 			PublicKeyPem:  pubPem,
@@ -140,6 +138,7 @@ func (lc *LeafCmd) Run(ctx context.Context, db *sql.DB, query base.Querier) erro
 			IssuerSerialNumber: sql.NullString{String: fmt.Sprintf("%x", issuer.Cert.SerialNumber), Valid: false},
 			Skid:               skidHex,
 			Akid:               akidHex,
+			Status:             "ACTIVE",
 			NotBefore:          leafCert.NotBefore,
 			NotAfter:           leafCert.NotAfter,
 			CertificatePem:     string(certPem),
@@ -158,22 +157,4 @@ func (lc *LeafCmd) Run(ctx context.Context, db *sql.DB, query base.Querier) erro
 	log.Println("Success: successfully Created Certificate.")
 
 	return nil
-}
-
-func (lc *LeafCmd) fetchIssuerCertificate(ctx context.Context, query base.Querier) (*base.Certificate, error) {
-	if lc.ISerialNumber != "" && lc.ICommonName == "" {
-		dbCert, err := query.GetCertificateBySN(ctx, lc.ISerialNumber)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get Certificate: %w", err)
-		}
-		return &dbCert, nil
-	} else if lc.ISerialNumber == "" && lc.ICommonName != "" {
-		dbCert, err := query.GetCertificateByCN(ctx, lc.ICommonName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get Certificate: %w", err)
-		}
-		return &dbCert, nil
-	} else {
-		return nil, errors.New("exactly one flag (--sn or --cn) must be provided")
-	}
 }

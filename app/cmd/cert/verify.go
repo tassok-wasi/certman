@@ -6,30 +6,28 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"time"
 )
 
 type VerifyCmd struct {
-	SerialNumber string `name:"sn" xor:"own" help:"Serial Number of the Certificate."`
-	CommonName   string `name:"cn" xor:"own" help:"Common Name of the Certificate."`
+	ID int64 `arg:"" help:"Certificate ID"`
 }
 
 func (vc *VerifyCmd) Run(ctx context.Context, query base.Querier) error {
-	currentDBCert, err := vc.fetchCertificate(ctx, query)
+	dbCert, err := query.GetCertificateByID(ctx, vc.ID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get Certificate from db: %w", err)
 	}
 
-	currentX509, err := utils.ParseCertificate([]byte(currentDBCert.CertificatePem))
+	cert, err := utils.ParseCertificate([]byte(dbCert.CertificatePem))
 	if err != nil {
 		return fmt.Errorf("failed to parse target certificate: %w", err)
 	}
 
 	// Build and walk the trust chain upward using AKID -> SKID pointers
-	chain := []*x509.Certificate{currentX509}
-	workingCert := currentX509
+	chain := []*x509.Certificate{cert}
+	workingCert := cert
 
 	fmt.Println("Building and verifying trust chain...")
 
@@ -81,21 +79,4 @@ func (vc *VerifyCmd) Run(ctx context.Context, query base.Querier) error {
 
 	fmt.Println("\nCertificate chain successfully verified against a trusted local root anchor!")
 	return nil
-}
-
-func (vc *VerifyCmd) fetchCertificate(ctx context.Context, query base.Querier) (*base.Certificate, error) {
-	if vc.SerialNumber != "" && vc.CommonName == "" {
-		dbCert, err := query.GetCertificateBySN(ctx, vc.SerialNumber)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get Certificate by SN: %w", err)
-		}
-		return &dbCert, nil
-	} else if vc.SerialNumber == "" && vc.CommonName != "" {
-		dbCert, err := query.GetCertificateByCN(ctx, vc.CommonName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get Certificate by CN: %w", err)
-		}
-		return &dbCert, nil
-	}
-	return nil, errors.New("exactly one flag (--sn or --cn) must be provided")
 }

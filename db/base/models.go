@@ -24,6 +24,7 @@ type Certificate struct {
 	RevocationReason   sql.NullInt64  `json:"revocation_reason"`
 	RevocationTime     sql.NullTime   `json:"revocation_time"`
 	CertificatePem     string         `json:"certificate_pem"`
+	Status             string         `json:"status"`
 	CreatedAt          sql.NullTime   `json:"created_at"`
 }
 
@@ -36,6 +37,16 @@ type Crl struct {
 	NextUpdate         time.Time    `json:"next_update"`
 	CrlPem             string       `json:"crl_pem"`
 	CreatedAt          sql.NullTime `json:"created_at"`
+}
+
+type Csr struct {
+	ID                      int64          `json:"id"`
+	CommonName              string         `json:"common_name"`
+	KeyName                 string         `json:"key_name"`
+	Status                  string         `json:"status"`
+	CsrPem                  string         `json:"csr_pem"`
+	CertificateSerialNumber sql.NullString `json:"certificate_serial_number"`
+	CreatedAt               sql.NullTime   `json:"created_at"`
 }
 
 type Key struct {

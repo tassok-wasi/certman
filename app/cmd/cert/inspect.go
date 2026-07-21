@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -16,12 +15,11 @@ import (
 )
 
 type InspectCmd struct {
-	SerialNumber string `name:"sn" xor:"own" help:"Serial Number of the Certificate."`
-	CommonName   string `name:"cn" xor:"own" help:"Common Name of the Certificate."`
-	Fingerprint  bool   `name:"fingerprint" short:"f" help:"Display SHA-1 and SHA-256 fingerprints."`
-	Usage        bool   `name:"key-usages" short:"u" help:"Display X.509 structural key usage flags."`
-	Extensions   bool   `name:"extensions" short:"e" help:"Display X.509 structural extension usage flags."`
-	JSON         bool   `name:"json" short:"j" help:"Output certificate details in raw JSON format for scripting."`
+	ID          int64 `arg:"" help:"Certificate ID"`
+	Fingerprint bool  `name:"fingerprint" short:"f" help:"Display SHA-1 and SHA-256 fingerprints."`
+	Usage       bool  `name:"key-usages" short:"u" help:"Display X.509 structural key usage flags."`
+	Extensions  bool  `name:"extensions" short:"e" help:"Display X.509 structural extension usage flags."`
+	JSON        bool  `name:"json" short:"j" help:"Output certificate details in raw JSON format for scripting."`
 }
 
 type JSONOutput struct {
@@ -43,7 +41,12 @@ type JSONOutput struct {
 }
 
 func (ic *InspectCmd) Run(ctx context.Context, query base.Querier) error {
-	cert, err := ic.fetchCertificate(ctx, query)
+	dbCert, err := query.GetCertificateByID(ctx, ic.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get Certificate from db: %w", err)
+	}
+
+	cert, err := utils.ParseCertificate([]byte(dbCert.CertificatePem))
 	if err != nil {
 		return err
 	}
@@ -55,33 +58,6 @@ func (ic *InspectCmd) Run(ctx context.Context, query base.Querier) error {
 	}
 
 	return ic.outputPretty(cert, keyAlgo, keySize)
-}
-
-func (icc *InspectCmd) fetchCertificate(ctx context.Context, query base.Querier) (*x509.Certificate, error) {
-	var cert *x509.Certificate
-
-	if icc.SerialNumber != "" && icc.CommonName == "" {
-		dbCert, err := query.GetCertificateBySN(ctx, icc.SerialNumber)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get Certificate: %w", err)
-		}
-		cert, err = utils.ParseCertificate([]byte(dbCert.CertificatePem))
-		if err != nil {
-			return nil, err
-		}
-	} else if icc.SerialNumber == "" && icc.CommonName != "" {
-		dbCert, err := query.GetCertificateByCN(ctx, icc.CommonName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get Certificate: %w", err)
-		}
-		cert, err = utils.ParseCertificate([]byte(dbCert.CertificatePem))
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		return nil, errors.New("exactly one flag (--sn or --cn) must be provided")
-	}
-	return cert, nil
 }
 
 func (ic *InspectCmd) outputJSON(cert *x509.Certificate, keyAlgo, keySize string) error {

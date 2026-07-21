@@ -15,14 +15,14 @@ import (
 )
 
 type InspectCmd struct {
-	Name     string `name:"key-name" aliases:"key" required:"" help:"Name of the Key Pair."`
-	Validate bool   `name:"validate" short:"v" help:"Verify the mathematical integrity and validity of the private key."`
+	ID       int  `arg:"" help:"ID of the Key to Inspect."`
+	Validate bool `name:"validate" short:"v" help:"Verify the mathematical integrity and validity of the private key."`
 }
 
 func (ic *InspectCmd) Run(ctx context.Context, query base.Querier) error {
-	key, err := query.GetKeyByName(ctx, ic.Name)
+	key, err := query.GetKeyByID(ctx, int64(ic.ID))
 	if err != nil {
-		return fmt.Errorf("failed to get Key: %w", err)
+		return fmt.Errorf("failed to get Key from db: %w", err)
 	}
 
 	privateKey, publicKey, err := utils.ParseKeys([]byte(key.PrivateKeyPem), []byte(key.PublicKeyPem))
@@ -32,7 +32,7 @@ func (ic *InspectCmd) Run(ctx context.Context, query base.Querier) error {
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 
-	fmt.Fprintf(w, "Key Inspection Report — %s\n", ic.Name)
+	fmt.Fprintf(w, "Key Inspection Report — %s\n", key.Name)
 	fmt.Fprintln(w, strings.Repeat("─", 60))
 
 	ic.inspectPrivateKey(w, privateKey, ic.Validate)

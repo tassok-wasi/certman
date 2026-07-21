@@ -1,4 +1,4 @@
-package crl
+package csr
 
 import (
 	"certman/app/utils"
@@ -13,15 +13,15 @@ import (
 )
 
 type ExportCmd struct {
-	ID     int64  `arg:"" help:"ID of the CRL to Export."`
+	ID     int64  `arg:"" help:"ID of the CSR to Export."`
 	Path   string `name:"path" short:"p" type:"path" help:"Path to export the file. [file name must be omitted]"`
 	Format string `name:"format" short:"f" default:"pem" help:"Specific format to export (e.g., pem, der)"`
 }
 
 func (ec *ExportCmd) Run(ctx context.Context, query base.Querier) error {
-	crl, err := query.GetCRLByID(ctx, ec.ID)
+	dbCsr, err := query.GetCSRByID(ctx, ec.ID)
 	if err != nil {
-		return fmt.Errorf("failed to get CRL from db: %w", err)
+		return fmt.Errorf("failed to get CSR from db: %w", err)
 	}
 
 	format := strings.ToLower(strings.TrimSpace(ec.Format))
@@ -35,11 +35,11 @@ func (ec *ExportCmd) Run(ctx context.Context, query base.Querier) error {
 	switch format {
 	case "pem":
 		ext = ".pem"
-		data = []byte(crl.CrlPem)
+		data = []byte(dbCsr.CsrPem)
 
 	case "der":
 		ext = ".der"
-		block, _ := pem.Decode([]byte(crl.CrlPem))
+		block, _ := pem.Decode([]byte(dbCsr.CsrPem))
 		if block == nil {
 			return errors.New("failed to decode PEM block into DER")
 		}
@@ -60,13 +60,13 @@ func (ec *ExportCmd) Run(ctx context.Context, query base.Querier) error {
 		}
 	}
 
-	filename := utils.SanitizeFilename(crl.Name, "exported_crl") + ext
-	crlFilePath := filepath.Join(outputDir, filename)
+	filename := utils.SanitizeFilename(dbCsr.CommonName, "exported_csr") + ext
+	csrFilePath := filepath.Join(outputDir, filename)
 
-	if err := os.WriteFile(crlFilePath, data, 0o644); err != nil {
-		return fmt.Errorf("could not write to file %s: %w", crlFilePath, err)
+	if err := os.WriteFile(csrFilePath, data, 0o644); err != nil {
+		return fmt.Errorf("could not write to file %s: %w", csrFilePath, err)
 	}
 
-	fmt.Printf("Successfully exported CRL to: %s\n", crlFilePath)
+	fmt.Printf("Successfully exported CSR to: %s\n", csrFilePath)
 	return nil
 }

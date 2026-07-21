@@ -24,11 +24,27 @@ CREATE TABLE IF NOT EXISTS certificates (
     revocation_reason INTEGER,
     revocation_time DATETIME,
     certificate_pem TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (key_name) REFERENCES keys(name) ON DELETE RESTRICT,
     FOREIGN KEY (issuer_serial_number) REFERENCES certificates(serial_number) ON DELETE SET NULL,
     CHECK (type IN ('CA', 'INTERMEDIATE', 'LEAF')),
-    CHECK (is_revoked IN (0, 1))
+    CHECK (is_revoked IN (0, 1)),
+    CHECK (status IN ('ACTIVE', 'REVOKED', 'EXPIRED')),
+    CHECK (status = 'REVOKED' AND is_revoked = 1)
+);
+
+CREATE TABLE IF NOT EXISTS csrs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    common_name TEXT NOT NULL,
+    key_name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    csr_pem TEXT NOT NULL,
+    certificate_serial_number TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (key_name) REFERENCES keys(name) ON DELETE RESTRICT,
+    FOREIGN KEY (certificate_serial_number) REFERENCES certificates(serial_number) ON DELETE SET NULL,
+    CHECK (status IN ('PENDING', 'SIGNED', 'REJECTED'))
 );
 
 CREATE TABLE IF NOT EXISTS crls (
@@ -48,6 +64,10 @@ CREATE TABLE IF NOT EXISTS crls (
 CREATE INDEX IF NOT EXISTS idx_certs_serial ON certificates(serial_number);
 CREATE INDEX IF NOT EXISTS idx_certs_revoked ON certificates(is_revoked);
 CREATE INDEX IF NOT EXISTS idx_certs_cn ON certificates(common_name);
+
+-- CSR Optimization Indexes
+CREATE INDEX IF NOT EXISTS idx_csrs_status ON csrs(status);
+CREATE INDEX IF NOT EXISTS idx_csrs_cn ON csrs(common_name);
 
 -- O(1) Optimization Indexes for X509 Hierarchy Mapping and Verification
 CREATE INDEX IF NOT EXISTS idx_certs_skid ON certificates(skid);

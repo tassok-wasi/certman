@@ -12,13 +12,13 @@ import (
 )
 
 type InspectCmd struct {
-	CRLName string `name:"crl-name" aliases:"crl" help:"DB recorded CRL Name."`
+	ID int64 `arg:"" help:"ID of the CRL to Inspect."`
 }
 
 func (ic *InspectCmd) Run(ctx context.Context, query base.Querier) error {
-	crlRecord, err := query.GetCRLByName(ctx, ic.CRLName)
+	crlRecord, err := query.GetCRLByID(ctx, ic.ID)
 	if err != nil {
-		return fmt.Errorf("failed to get crl: %w", err)
+		return fmt.Errorf("failed to get CRL from db: %w", err)
 	}
 
 	block, _ := pem.Decode([]byte(crlRecord.CrlPem))

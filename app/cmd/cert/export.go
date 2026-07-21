@@ -9,65 +9,64 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type ExportCmd struct {
-	SerialNumber string `name:"sn" xor:"own" help:"Serial Number of the Certificate."`
-	CommonName   string `name:"cn" xor:"own" help:"Common Name of the Certificate."`
-	Path         string `name:"path" short:"p" type:"path" help:"Path to export the file. [file name must be omitted]"`
-	Format       string `name:"format" short:"f" help:"Specific format to export (e.g.,pem,der)"`
+	ID     int64  `arg:"" help:"ID of the Certificate to Export."`
+	Path   string `name:"path" short:"p" type:"path" help:"Path to export the file. [file name must be omitted]"`
+	Format string `name:"format" short:"f" default:"pem" help:"Specific format to export (e.g., pem, der)"`
 }
 
 func (ec *ExportCmd) Run(ctx context.Context, query base.Querier) error {
-	var dbCert base.Certificate
-	var err error
-
-	if ec.SerialNumber != "" && ec.CommonName == "" {
-		dbCert, err = query.GetCertificateBySN(ctx, ec.SerialNumber)
-		if err != nil {
-			return fmt.Errorf("failed to get Certificate: %w", err)
-		}
-	} else if ec.SerialNumber == "" && ec.CommonName != "" {
-		dbCert, err = query.GetCertificateByCN(ctx, ec.CommonName)
-		if err != nil {
-			return fmt.Errorf("failed to get Certificate: %w", err)
-		}
-	} else {
-		return errors.New("exactly one flag (--sn or --cn) must be provided")
+	dbCert, err := query.GetCertificateByID(ctx, ec.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get Certificate from db: %w", err)
 	}
 
-	ext := ".pem"
-	if ec.Format == "der" {
+	format := strings.ToLower(strings.TrimSpace(ec.Format))
+	if format == "" {
+		format = "pem"
+	}
+
+	var data []byte
+	var ext string
+
+	switch format {
+	case "pem":
+		ext = ".pem"
+		data = []byte(dbCert.CertificatePem)
+
+	case "der":
 		ext = ".der"
-	}
-
-	var filePath string
-	baseName := utils.SanitizeFilename(dbCert.CommonName, "exported_certificate") + ext
-	if ec.Path != "" {
-		targetDir, err := utils.JoinHomeDir(ec.Path)
-		if err != nil {
-			return err
-		}
-		filePath = filepath.Join(targetDir, baseName)
-	} else {
-		filePath = baseName
-	}
-
-	if ec.Format == "pem" {
-		err := os.WriteFile(filePath, []byte(dbCert.CertificatePem), 0o644)
-		if err != nil {
-			return fmt.Errorf("failed to write file: %w", err)
-		}
-	} else {
 		block, _ := pem.Decode([]byte(dbCert.CertificatePem))
 		if block == nil {
-			return errors.New("failed to decode PEM formatted Certificate")
+			return errors.New("failed to decode PEM formatted Certificate into DER")
 		}
-		err = os.WriteFile(filePath, block.Bytes, 0o644)
+		data = block.Bytes
+
+	default:
+		return fmt.Errorf("unsupported format '%s': expected 'pem' or 'der'", ec.Format)
+	}
+
+	var outputDir string
+	if ec.Path != "" {
+		outputDir, err = utils.JoinHomeDir(ec.Path)
 		if err != nil {
-			return fmt.Errorf("failed to write file: %w", err)
+			return fmt.Errorf("failed to resolve output path: %w", err)
+		}
+		if err := os.MkdirAll(outputDir, 0755); err != nil {
+			return fmt.Errorf("failed to create target directory: %w", err)
 		}
 	}
 
+	filename := utils.SanitizeFilename(dbCert.CommonName, "exported_certificate") + ext
+	certFilePath := filepath.Join(outputDir, filename)
+
+	if err := os.WriteFile(certFilePath, data, 0o644); err != nil {
+		return fmt.Errorf("could not write to file %s: %w", certFilePath, err)
+	}
+
+	fmt.Printf("Successfully exported Certificate to: %s\n", certFilePath)
 	return nil
 }
