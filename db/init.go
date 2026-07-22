@@ -24,11 +24,11 @@ import (
 
 // InitializeDB handles creating the folder, the file, and running the schema
 func InitializeDB(dbDir string) error {
-	if err := os.MkdirAll(dbDir, 0755); err != nil {
+	if err := os.MkdirAll(dbDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	dbPath := filepath.Join(dbDir, "certman.db")
+	dbPath := filepath.Join(dbDir, "pkit.db")
 	fmt.Printf("Initializing database at: %s\n", dbPath)
 
 	db, err := sql.Open("sqlite3", dbPath)

@@ -31,13 +31,13 @@ func (ic *InitCmd) Run() error {
 		return fmt.Errorf("failed to find user home directory: %w", err)
 	}
 
-	appDataPath := filepath.Join(homDir, ".certman")
+	appDataPath := filepath.Join(homDir, ".pkit")
 
-	dbPath := filepath.Join(appDataPath, "certman.db")
+	dbPath := filepath.Join(appDataPath, "pkit.db")
 	if _, err := os.Stat(dbPath); err == nil {
 		_, keyErr := utils.GetMasterKey()
 		if keyErr == nil {
-			return fmt.Errorf("application is already initialized. Use 'certman' commands directly")
+			return fmt.Errorf("application is already initialized. Use 'pkit' commands directly")
 		}
 		fmt.Println("Database exists but master key not found. Recreating master key...")
 		return utils.InitMasterKey()

@@ -53,8 +53,8 @@ func (cli *CLI) AfterApply(ctx *kong.Context) error {
 		return fmt.Errorf("could not get user home directory: %w", err)
 	}
 
-	appDataPath := filepath.Join(home, ".certman")
-	dbPath := filepath.Join(appDataPath, "certman.db")
+	appDataPath := filepath.Join(home, ".pkit")
+	dbPath := filepath.Join(appDataPath, "pkit.db")
 
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		return fmt.Errorf("application not initialized. Please run 'pkit init' first")

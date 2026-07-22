@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	serviceName = "certman"
+	serviceName = "pkit"
 	accountName = "master-key"
 )
 
@@ -53,7 +53,7 @@ func GetMasterKey() ([]byte, error) {
 	keyHex, err := keyring.Get(serviceName, accountName)
 	if err != nil {
 		if errors.Is(err, keyring.ErrNotFound) {
-			return nil, errors.New("App not initialized. Please run 'certman init' first")
+			return nil, errors.New("app not initialized. Please run 'pkit init' first")
 		}
 		return nil, fmt.Errorf("failed to fetch key from OS keyring: %v", err)
 	}
